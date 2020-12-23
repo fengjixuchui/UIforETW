@@ -100,10 +100,25 @@ DWORD ChildProcess::ListenerThread()
 #ifdef OUTPUT_DEBUG_STRINGS
 				OutputDebugStringA(buffer);
 #endif
+				// Convert from LF to CRLF line endings.
+				char buffer2[sizeof(buffer) * 2];
+				bool lastWasCR = false;
+				for (int in = 0, out = 0; /**/; /**/)
+				{
+					const char c = buffer[in++];
+					// Edit controls on older versions of Windows (and by default on newer
+					// versions) need \r\n line endings, \n is not sufficient.
+					if (c == '\n' && !lastWasCR)
+						buffer2[out++] = '\r';
+					buffer2[out++] = c;
+					lastWasCR = c == '\r';
+					if (!c)
+						break;
+				}
 #ifdef _UNICODE
-				processOutput_ += AnsiToUnicode(buffer);
+				processOutput_ += AnsiToUnicode(buffer2);
 #else
-				processOutput_ += buffer;
+				processOutput += buffer2;
 #endif
 			}
 			SetEvent(hOutputAvailable_);
@@ -151,7 +166,7 @@ bool ChildProcess::Run(bool showCommand, string_type args)
 	startupInfo.dwFlags = STARTF_USESTDHANDLES;
 
 	PROCESS_INFORMATION processInfo = {};
-	const DWORD flags = CREATE_NO_WINDOW;
+	constexpr DWORD flags = CREATE_NO_WINDOW;
 	// Wacky CreateProcess rules say args has to be writable!
 	std::vector<_TCHAR> argsCopy(args.size() + 1);
 	_tcscpy_s(&argsCopy[0], argsCopy.size(), args.c_str());
@@ -171,15 +186,16 @@ bool ChildProcess::Run(bool showCommand, string_type args)
 	return false;
 }
 
-DWORD ChildProcess::GetExitCode()
+DWORD ChildProcess::GetExitCode() noexcept
 {
 	if (!hProcess_)
 		return 0;
 	// Don't allow getting the exit code unless the process has exited.
 	WaitForCompletion(true);
 	DWORD result;
-	(void)GetExitCodeProcess(hProcess_, &result);
-	return result;
+	if (GetExitCodeProcess(hProcess_, &result))
+		return result;
+	return 0;
 }
 
 ChildProcess::string_type ChildProcess::GetOutput()
